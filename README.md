@@ -40,11 +40,21 @@ Quy tắc khoá và xoá nội dung nằm ở mục "Admin CRUD" trong `docs/DEC
 
 ## Deploy
 
-Chưa được thiết lập. Build là file tĩnh, cấu hình bằng:
+### Vercel
+
+Cấu hình nằm ở `vercel.json`: Vercel tự cài bằng pnpm, chạy `pnpm build`, phục vụ `dist/`.
+
+- Trên Vercel (Settings → Environment Variables) đặt `VITE_API_BASE_URL=https://moneytogether.dpdns.org/service/vocab` (cùng backend production mà ios_app dùng). Biến này được nhúng lúc build, đổi xong phải redeploy.
+- Trình duyệt gọi thẳng backend, nên domain admin phải nằm trong `CORS_ORIGINS` của backend (GitHub variable của repo backend, cách nhau bằng dấu phẩy, ví dụ `https://vocab-admin.vercel.app`).
+- Mọi đường dẫn khác trả `index.html` để React Router xử lý. Giữ `VITE_BASE_PATH=/`.
+
+### Máy chủ tĩnh khác
+
+Build là file tĩnh, cấu hình bằng:
 
 | Biến | Ví dụ production | Ý nghĩa |
 |---|---|---|
 | `VITE_API_BASE_URL` | `/service/vocab` | URL backend theo góc nhìn của trình duyệt |
 | `VITE_BASE_PATH` | `/service/vocab-admin/` | Đường dẫn phục vụ app |
 
-Máy chủ tĩnh phải trả `index.html` cho các đường dẫn không phải file. Nếu app ở khác origin với backend, backend cần bật CORS (hiện chưa có).
+Máy chủ tĩnh phải trả `index.html` cho các đường dẫn không phải file. Nếu app ở khác origin với backend, thêm origin của app vào `CORS_ORIGINS` của backend.
