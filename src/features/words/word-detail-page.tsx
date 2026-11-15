@@ -18,7 +18,7 @@ import { api } from '@/lib/api'
 import { formatDate } from '@/lib/labels'
 import { useApiMutation } from '@/lib/query'
 import { useMeta } from '@/lib/use-meta'
-import { AUDIO_STATUS_KEY, generateAudio, playAudio, type GenerateBody, type GenerateResult } from '../audio/audio-api'
+import { AUDIO_KEY, generateAudio, playAudio, refreshPublications, type GenerateBody, type GenerateResult, type PublicationKey } from '../audio/audio-api'
 import { MeaningLocaleEditor } from './meaning-locale-editor'
 import { highlightedText, locateTarget, type ExampleDetail, type MeaningDetail, type PublicationRevision, type TypeDetail, type WordDetail } from './words-api'
 
@@ -33,14 +33,26 @@ const exampleSchema = z.object({ sourceText: z.string().trim().min(1, 'Nhập c�
 const EXAMPLE_FIELDS = [{ name: 'sourceText', label: 'Câu ví dụ', type: 'textarea' as const }, { name: 'target', label: 'Từ tô sáng', hint: 'Phải xuất hiện trong câu.' }]
 const PRONUNCIATION_FIELDS = [{ name: 'accentLocale', label: 'Accent' }, { name: 'ipa', label: 'IPA' }, { name: 'audioAssetKey', label: 'URL âm thanh' }]
 
-/** Live snapshots keep their old audio until republished, so say so when it matters. */
-function useGenerateAudio(wordKey: readonly unknown[], hasLive: boolean) {
+const livePublications = (types: TypeDetail[]): PublicationKey[] =>
+  types.flatMap((t) => t.meanings.flatMap((m) => m.publications.filter((p) => !p.recalledAt).map((p) => ({ meaningId: m.id, locale: p.locale }))))
+
+/** Live snapshots keep their old audio, so offer to republish just the audio right away. */
+function useGenerateAudio(wordKey: readonly unknown[], live: PublicationKey[]) {
+  const republish = useApiMutation({
+    mutationFn: () => refreshPublications(live),
+    invalidate: [wordKey, AUDIO_KEY],
+    success: 'Đã publish lại audio cho các nghĩa đang live',
+  })
   return useApiMutation<GenerateBody, GenerateResult>({
     mutationFn: generateAudio,
-    invalidate: [wordKey, AUDIO_STATUS_KEY],
+    invalidate: [wordKey, AUDIO_KEY],
     onSuccess: ({ generated, failed }) => {
       if (generated.length === 0 && failed.length === 0) return void toast.info('Không có phát âm nào cần tạo audio.')
-      if (generated.length > 0) toast.success(`Đã tạo ${generated.length} audio`, { description: hasLive ? 'Publish lại các nghĩa đang live để người học nghe audio mới.' : undefined })
+      if (generated.length > 0) {
+        toast.success(`Đã tạo ${generated.length} audio`, live.length > 0
+          ? { description: 'Bản live vẫn phát audio cũ cho tới khi publish lại.', action: { label: 'Publish lại audio', onClick: () => republish.mutate() }, duration: 10_000 }
+          : undefined)
+      }
       if (failed.length > 0) toast.error(`${failed.length} audio bị lỗi`, { description: failed[0].message })
     },
   })
@@ -194,8 +206,7 @@ function TypeCard({ type, wordKey }: { type: TypeDetail; wordKey: readonly unkno
   const invalidate = [wordKey, ['words']]
   const hasPublication = type.meanings.some((m) => m.publications.length > 0)
   const removeType = useApiMutation({ mutationFn: () => api(`/admin/word-types/${type.id}`, { method: 'DELETE' }), invalidate, success: 'Đã xoá loại từ' })
-  const hasLive = type.meanings.some((m) => m.publications.some((p) => !p.recalledAt))
-  const voice = useGenerateAudio(wordKey, hasLive)
+  const voice = useGenerateAudio(wordKey, livePublications([type]))
   const removePronunciation = useApiMutation<string>({ mutationFn: (id) => api(`/admin/pronunciations/${id}`, { method: 'DELETE' }), invalidate, success: 'Đã xoá phát âm' })
   const toBody = ({ accentLocale, ipa, audioAssetKey }: z.infer<typeof pronunciationSchema>) => ({ accentLocale, ipa: emptyToNull(ipa), audioAssetKey: emptyToNull(audioAssetKey) })
   const savePronunciation = useApiMutation<{ id?: string; values: z.infer<typeof pronunciationSchema> }>({
@@ -321,8 +332,7 @@ export function WordDetailPage() {
     success: 'Đã xoá từ',
     onSuccess: () => navigate('/words'),
   })
-  const hasLive = word?.types.some((t) => t.meanings.some((m) => m.publications.some((p) => !p.recalledAt))) ?? false
-  const voice = useGenerateAudio(wordKey, hasLive)
+  const voice = useGenerateAudio(wordKey, livePublications(word?.types ?? []))
   const addType = useApiMutation<z.infer<typeof typeSchema>>({
     mutationFn: (body) => api(`/admin/words/${id}/types`, { method: 'POST', body }),
     invalidate,

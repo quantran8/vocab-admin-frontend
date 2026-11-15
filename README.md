@@ -34,7 +34,7 @@ Vite chuyển tiếp `/api` sang `VITE_DEV_BACKEND` (mặc định `http://local
 
 ## Âm thanh
 
-Màn Âm thanh tạo audio phát âm hàng loạt qua `POST /admin/audio/generate` của backend (ElevenLabs, lưu trên Cloudflare R2), chạy từng lượt tới khi hết phát âm thiếu audio. Trang chi tiết từ có nút nghe, tạo audio còn thiếu cho từ, và tạo lại audio cho từng phát âm. Nghĩa đang live chỉ phát audio mới sau khi publish lại.
+Màn Âm thanh tạo audio phát âm hàng loạt qua `POST /admin/audio/generate` của backend (ElevenLabs, lưu trên Cloudflare R2), chạy từng lượt tới khi hết phát âm thiếu audio. Trang chi tiết từ có nút nghe, tạo audio còn thiếu cho từ, và tạo lại audio cho từng phát âm. Tab Thiếu audio liệt kê phát âm chưa có audio. Tab Cần publish lại liệt kê nghĩa đang live còn phát audio cũ; publish lại ở đây chỉ thay audio trong bản live, không đẩy các chỉnh sửa khác chưa publish.
 
 Quy tắc khoá và xoá nội dung nằm ở mục "Admin CRUD" trong `docs/DECISIONS.md` của backend.
 
