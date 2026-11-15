@@ -43,6 +43,8 @@ export interface MeaningDetail {
   localizations: MeaningLocalization[]
   examples: ExampleDetail[]
   publications: MeaningPublicationState[]
+  /** Per meaning: senses of one spelling can sound different. */
+  pronunciations: PronunciationDetail[]
 }
 
 export interface PronunciationDetail {
@@ -55,7 +57,6 @@ export interface PronunciationDetail {
 export interface TypeDetail {
   id: string
   partOfSpeech: string
-  pronunciations: PronunciationDetail[]
   meanings: MeaningDetail[]
 }
 

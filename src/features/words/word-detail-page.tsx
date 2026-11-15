@@ -27,14 +27,15 @@ const emptyToNull = (text: string) => text.trim() || null
 const wordSchema = z.object({ lemma: z.string().trim().min(1, 'Nhập từ'), homographKey: z.string() })
 const pronunciationSchema = z.object({ accentLocale: z.string().trim().min(2, 'Nhập accent'), ipa: z.string(), audioAssetKey: z.string() })
 const meaningSchema = z.object({ cefrLevel: z.string().nullable(), coreDefinition: z.string() })
+const newMeaningSchema = meaningSchema.extend({ ipa: z.string() })
 const typeSchema = z.object({ partOfSpeech: z.string({ error: 'Chọn loại từ' }).min(1, 'Chọn loại từ') })
 const exampleSchema = z.object({ sourceText: z.string().trim().min(1, 'Nhập câu ví dụ'), target: z.string().trim().min(1, 'Nhập từ cần tô sáng') })
   .refine((e) => locateTarget(e.sourceText, e.target) !== null, { path: ['target'], message: 'Không tìm thấy trong câu ví dụ' })
 const EXAMPLE_FIELDS = [{ name: 'sourceText', label: 'Câu ví dụ', type: 'textarea' as const }, { name: 'target', label: 'Từ tô sáng', hint: 'Phải xuất hiện trong câu.' }]
 const PRONUNCIATION_FIELDS = [{ name: 'accentLocale', label: 'Accent' }, { name: 'ipa', label: 'IPA' }, { name: 'audioAssetKey', label: 'URL âm thanh' }]
 
-const livePublications = (types: TypeDetail[]): PublicationKey[] =>
-  types.flatMap((t) => t.meanings.flatMap((m) => m.publications.filter((p) => !p.recalledAt).map((p) => ({ meaningId: m.id, locale: p.locale }))))
+const livePublications = (meanings: MeaningDetail[]): PublicationKey[] =>
+  meanings.flatMap((m) => m.publications.filter((p) => !p.recalledAt).map((p) => ({ meaningId: m.id, locale: p.locale })))
 
 /** Live snapshots keep their old audio, so offer to republish just the audio right away. */
 function useGenerateAudio(wordKey: readonly unknown[], live: PublicationKey[]) {
@@ -147,6 +148,80 @@ function ExamplesSection({ meaning, wordKey }: { meaning: MeaningDetail; wordKey
   )
 }
 
+/** IPA and audio belong to the meaning: senses of one spelling can sound different. */
+function PronunciationsSection({ meaning, wordKey }: { meaning: MeaningDetail; wordKey: readonly unknown[] }) {
+  const meta = useMeta()
+  const invalidate = [wordKey, ['words']]
+  const published = meaning.publications.length > 0
+  const voice = useGenerateAudio(wordKey, livePublications([meaning]))
+  const remove = useApiMutation<string>({ mutationFn: (id) => api(`/admin/pronunciations/${id}`, { method: 'DELETE' }), invalidate, success: 'Đã xoá phát âm' })
+  const toBody = ({ accentLocale, ipa, audioAssetKey }: z.infer<typeof pronunciationSchema>) => ({ accentLocale, ipa: emptyToNull(ipa), audioAssetKey: emptyToNull(audioAssetKey) })
+  const save = useApiMutation<{ id?: string; values: z.infer<typeof pronunciationSchema> }>({
+    mutationFn: ({ id, values }) => {
+      if (id) return api(`/admin/pronunciations/${id}`, { method: 'PATCH', body: toBody(values) })
+      const { ipa, audioAssetKey } = toBody(values)
+      return api(`/admin/meanings/${meaning.id}/pronunciations`, {
+        method: 'POST',
+        body: { accentLocale: values.accentLocale, ...(ipa && { ipa }), ...(audioAssetKey && { audioAssetKey }) },
+      })
+    },
+    invalidate,
+    success: 'Đã lưu phát âm',
+    silent: true,
+  })
+  return (
+    <section className="grid gap-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">Phát âm</p>
+        <FormDialog
+          trigger={<Button variant="outline" size="sm" />}
+          triggerLabel={<><Plus /> Thêm phát âm</>}
+          title="Thêm phát âm"
+          schema={pronunciationSchema}
+          fields={PRONUNCIATION_FIELDS}
+          defaultValues={{ accentLocale: meta.audioAccent ?? 'en-US', ipa: '', audioAssetKey: '' }}
+          onSubmit={(values) => save.mutateAsync({ values })}
+        />
+      </div>
+      {meaning.pronunciations.length === 0 && <EmptyState>Chưa có phát âm. Cần có IPA để publish và để tạo audio.</EmptyState>}
+      {meaning.pronunciations.map((p) => (
+        <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
+          <span>{p.accentLocale} · {p.ipa ?? <span className="text-destructive">Thiếu IPA</span>}{p.audioAssetKey && ' · có âm thanh'}</span>
+          <div className="flex gap-1">
+            {p.audioAssetKey && (
+              <Button variant="ghost" size="icon" aria-label={`Nghe ${p.accentLocale}`} onClick={() => playAudio(p.audioAssetKey!)}><Play /></Button>
+            )}
+            {p.accentLocale === meta.audioAccent && p.ipa && (
+              <ConfirmAction
+                variant="ghost"
+                size="icon"
+                ariaLabel={p.audioAssetKey ? 'Tạo lại audio' : 'Tạo audio'}
+                label={<AudioLines />}
+                title={p.audioAssetKey ? 'Tạo lại audio?' : 'Tạo audio?'}
+                description={`ElevenLabs đọc theo IPA ${p.ipa}. ${p.audioAssetKey ? 'Audio hiện tại sẽ bị thay. ' : ''}Việc này tốn credit.`}
+                confirmLabel="Tạo"
+                onConfirm={() => voice.mutate({ pronunciationIds: [p.id], overwrite: true })}
+              />
+            )}
+            <FormDialog
+              trigger={<Button variant="ghost" size="icon" aria-label="Sửa phát âm" />}
+              triggerLabel={<Pencil />}
+              title="Sửa phát âm"
+              schema={pronunciationSchema}
+              fields={PRONUNCIATION_FIELDS}
+              defaultValues={{ accentLocale: p.accentLocale, ipa: p.ipa ?? '', audioAssetKey: p.audioAssetKey ?? '' }}
+              onSubmit={(values) => save.mutateAsync({ id: p.id, values })}
+            />
+            {!published && (
+              <ConfirmAction variant="ghost" size="icon" ariaLabel="Xoá phát âm" label={<Trash2 />} title="Xoá phát âm?" description="Phát âm này sẽ bị xoá." confirmLabel="Xoá" onConfirm={() => remove.mutate(p.id)} />
+            )}
+          </div>
+        </div>
+      ))}
+    </section>
+  )
+}
+
 function MeaningCard({ meaning, index, wordKey }: { meaning: MeaningDetail; index: number; wordKey: readonly unknown[] }) {
   const meta = useMeta()
   const invalidate = [wordKey, ['words']]
@@ -185,6 +260,7 @@ function MeaningCard({ meaning, index, wordKey }: { meaning: MeaningDetail; inde
         </div>
       </div>
       {meaning.coreDefinition && <p className="text-sm text-muted-foreground">{meaning.coreDefinition}</p>}
+      <PronunciationsSection meaning={meaning} wordKey={wordKey} />
       <ExamplesSection meaning={meaning} wordKey={wordKey} />
       <Separator />
       <Tabs defaultValue={meta.locales[0] ?? 'vi-VN'}>
@@ -206,26 +282,14 @@ function TypeCard({ type, wordKey }: { type: TypeDetail; wordKey: readonly unkno
   const invalidate = [wordKey, ['words']]
   const hasPublication = type.meanings.some((m) => m.publications.length > 0)
   const removeType = useApiMutation({ mutationFn: () => api(`/admin/word-types/${type.id}`, { method: 'DELETE' }), invalidate, success: 'Đã xoá loại từ' })
-  const voice = useGenerateAudio(wordKey, livePublications([type]))
-  const removePronunciation = useApiMutation<string>({ mutationFn: (id) => api(`/admin/pronunciations/${id}`, { method: 'DELETE' }), invalidate, success: 'Đã xoá phát âm' })
-  const toBody = ({ accentLocale, ipa, audioAssetKey }: z.infer<typeof pronunciationSchema>) => ({ accentLocale, ipa: emptyToNull(ipa), audioAssetKey: emptyToNull(audioAssetKey) })
-  const savePronunciation = useApiMutation<{ id?: string; values: z.infer<typeof pronunciationSchema> }>({
-    mutationFn: ({ id, values }) => {
-      if (id) return api(`/admin/pronunciations/${id}`, { method: 'PATCH', body: toBody(values) })
-      const { ipa, audioAssetKey } = toBody(values)
-      return api(`/admin/word-types/${type.id}/pronunciations`, {
-        method: 'POST',
-        body: { accentLocale: values.accentLocale, ...(ipa && { ipa }), ...(audioAssetKey && { audioAssetKey }) },
-      })
-    },
-    invalidate,
-    success: 'Đã lưu phát âm',
-    silent: true,
-  })
-  const createMeaning = useApiMutation<z.infer<typeof meaningSchema>>({
-    mutationFn: ({ cefrLevel, coreDefinition }) => api(`/admin/word-types/${type.id}/meanings`, {
+  const createMeaning = useApiMutation<z.infer<typeof newMeaningSchema>>({
+    mutationFn: ({ cefrLevel, coreDefinition, ipa }) => api(`/admin/word-types/${type.id}/meanings`, {
       method: 'POST',
-      body: { ...(cefrLevel && { cefrLevel }), ...(coreDefinition.trim() && { coreDefinition }) },
+      body: {
+        ...(cefrLevel && { cefrLevel }),
+        ...(coreDefinition.trim() && { coreDefinition }),
+        pronunciations: [{ accentLocale: meta.audioAccent ?? 'en-US', ...(ipa.trim() && { ipa: ipa.trim() }) }],
+      },
     }),
     invalidate,
     success: 'Đã thêm nghĩa',
@@ -236,59 +300,10 @@ function TypeCard({ type, wordKey }: { type: TypeDetail; wordKey: readonly unkno
       <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
         <CardTitle>{type.partOfSpeech}</CardTitle>
         {!hasPublication && (
-          <ConfirmAction variant="ghost" label={<><Trash2 /> Xoá loại từ</>} title={`Xoá loại từ ${type.partOfSpeech}?`} description="Phát âm, nghĩa, ví dụ và bản dịch thuộc loại từ này sẽ bị xoá." confirmLabel="Xoá" onConfirm={() => removeType.mutate()} />
+          <ConfirmAction variant="ghost" label={<><Trash2 /> Xoá loại từ</>} title={`Xoá loại từ ${type.partOfSpeech}?`} description="Nghĩa, phát âm, ví dụ và bản dịch thuộc loại từ này sẽ bị xoá." confirmLabel="Xoá" onConfirm={() => removeType.mutate()} />
         )}
       </CardHeader>
       <CardContent className="grid gap-5">
-        <section className="grid gap-2">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium">Phát âm</p>
-            <FormDialog
-              trigger={<Button variant="outline" size="sm" />}
-              triggerLabel={<><Plus /> Thêm phát âm</>}
-              title="Thêm phát âm"
-              schema={pronunciationSchema}
-              fields={PRONUNCIATION_FIELDS}
-              defaultValues={{ accentLocale: 'en-US', ipa: '', audioAssetKey: '' }}
-              onSubmit={(values) => savePronunciation.mutateAsync({ values })}
-            />
-          </div>
-          {type.pronunciations.length === 0 && <EmptyState>Chưa có phát âm. Cần có IPA để publish.</EmptyState>}
-          {type.pronunciations.map((p) => (
-            <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
-              <span>{p.accentLocale} · {p.ipa ?? <span className="text-destructive">Thiếu IPA</span>}{p.audioAssetKey && ' · có âm thanh'}</span>
-              <div className="flex gap-1">
-                {p.audioAssetKey && (
-                  <Button variant="ghost" size="icon" aria-label={`Nghe ${p.accentLocale}`} onClick={() => playAudio(p.audioAssetKey!)}><Play /></Button>
-                )}
-                {p.accentLocale === meta.audioAccent && (
-                  <ConfirmAction
-                    variant="ghost"
-                    size="icon"
-                    ariaLabel={p.audioAssetKey ? 'Tạo lại audio' : 'Tạo audio'}
-                    label={<AudioLines />}
-                    title={p.audioAssetKey ? 'Tạo lại audio?' : 'Tạo audio?'}
-                    description={p.audioAssetKey ? 'Audio hiện tại sẽ bị thay bằng bản ElevenLabs mới. Việc này tốn credit.' : 'Gọi ElevenLabs để tạo audio cho phát âm này. Việc này tốn credit.'}
-                    confirmLabel="Tạo"
-                    onConfirm={() => voice.mutate({ pronunciationIds: [p.id], overwrite: true })}
-                  />
-                )}
-                <FormDialog
-                  trigger={<Button variant="ghost" size="icon" aria-label="Sửa phát âm" />}
-                  triggerLabel={<Pencil />}
-                  title="Sửa phát âm"
-                  schema={pronunciationSchema}
-                  fields={PRONUNCIATION_FIELDS}
-                  defaultValues={{ accentLocale: p.accentLocale, ipa: p.ipa ?? '', audioAssetKey: p.audioAssetKey ?? '' }}
-                  onSubmit={(values) => savePronunciation.mutateAsync({ id: p.id, values })}
-                />
-                {!hasPublication && (
-                  <ConfirmAction variant="ghost" size="icon" ariaLabel="Xoá phát âm" label={<Trash2 />} title="Xoá phát âm?" description="Phát âm này sẽ bị xoá." confirmLabel="Xoá" onConfirm={() => removePronunciation.mutate(p.id)} />
-                )}
-              </div>
-            </div>
-          ))}
-        </section>
         <section className="grid gap-3">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">Nghĩa dùng chung</p>
@@ -296,12 +311,13 @@ function TypeCard({ type, wordKey }: { type: TypeDetail; wordKey: readonly unkno
               trigger={<Button variant="outline" size="sm" />}
               triggerLabel={<><Plus /> Thêm nghĩa</>}
               title="Thêm nghĩa"
-              schema={meaningSchema}
+              schema={newMeaningSchema}
               fields={[
                 { name: 'cefrLevel', label: 'CEFR', type: 'select', options: toOptions(meta.cefrLevels), clearLabel: 'Chưa chọn' },
+                { name: 'ipa', label: `IPA (${meta.audioAccent ?? 'en-US'})`, hint: 'Nghĩa khác của cùng từ có thể đọc khác, vd. read /riːd/ và /rɛd/.' },
                 { name: 'coreDefinition', label: 'Định nghĩa gốc', type: 'textarea' },
               ]}
-              defaultValues={{ cefrLevel: null, coreDefinition: '' }}
+              defaultValues={{ cefrLevel: null, ipa: '', coreDefinition: '' }}
               onSubmit={(values) => createMeaning.mutateAsync(values)}
             />
           </div>
@@ -332,7 +348,7 @@ export function WordDetailPage() {
     success: 'Đã xoá từ',
     onSuccess: () => navigate('/words'),
   })
-  const voice = useGenerateAudio(wordKey, livePublications(word?.types ?? []))
+  const voice = useGenerateAudio(wordKey, livePublications(word?.types.flatMap((t) => t.meanings) ?? []))
   const addType = useApiMutation<z.infer<typeof typeSchema>>({
     mutationFn: (body) => api(`/admin/words/${id}/types`, { method: 'POST', body }),
     invalidate,
@@ -342,7 +358,7 @@ export function WordDetailPage() {
 
   if (!word) return <QueryState isLoading={isLoading} error={error} onRetry={() => void refetch()} />
   const usedPos = word.types.map((t) => t.partOfSpeech)
-  const missingAudio = word.types.some((t) => t.pronunciations.some((p) => p.accentLocale === meta.audioAccent && !p.audioAssetKey))
+  const missingAudio = word.types.some((t) => t.meanings.some((m) => m.pronunciations.some((p) => p.accentLocale === meta.audioAccent && p.ipa && !p.audioAssetKey)))
   return (
     <>
       <PageHeader

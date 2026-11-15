@@ -34,7 +34,7 @@ Vite chuyển tiếp `/api` sang `VITE_DEV_BACKEND` (mặc định `http://local
 
 ## Âm thanh
 
-Màn Âm thanh tạo audio phát âm hàng loạt qua `POST /admin/audio/generate` của backend (ElevenLabs, lưu trên Cloudflare R2), chạy từng lượt tới khi hết phát âm thiếu audio. Trang chi tiết từ có nút nghe, tạo audio còn thiếu cho từ, và tạo lại audio cho từng phát âm. Tab Thiếu audio liệt kê phát âm chưa có audio. Tab Cần publish lại liệt kê nghĩa đang live còn phát audio cũ; publish lại ở đây chỉ thay audio trong bản live, không đẩy các chỉnh sửa khác chưa publish.
+IPA và audio thuộc về từng nghĩa (các nghĩa của cùng một từ có thể đọc khác nhau). Màn Âm thanh tạo audio hàng loạt qua `POST /admin/audio/generate` của backend: ElevenLabs đọc theo IPA, chọn được voice (mặc định là voice trong env backend), lưu trên Cloudflare R2, các nghĩa trùng IPA dùng chung một file. Chạy từng lượt tới khi hết phát âm thiếu audio; phát âm thiếu IPA phải thêm IPA trước. Trang chi tiết từ có nút nghe, tạo audio còn thiếu cho từ, và tạo lại audio cho từng phát âm. Tab Thiếu audio liệt kê phát âm chưa có audio. Tab Cần publish lại liệt kê nghĩa đang live còn phát audio cũ; publish lại ở đây chỉ thay IPA và audio trong bản live, không đẩy các chỉnh sửa khác chưa publish.
 
 Quy tắc khoá và xoá nội dung nằm ở mục "Admin CRUD" trong `docs/DECISIONS.md` của backend.
 
