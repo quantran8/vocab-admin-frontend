@@ -1,7 +1,8 @@
-import { History, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AudioLines, History, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { toast } from 'sonner'
 import { z } from 'zod'
 import { toOptions } from '@/lib/form-utils'
 import { EmptyState, PageHeader, QueryState, StatusBadge } from '@/components/common'
@@ -17,6 +18,7 @@ import { api } from '@/lib/api'
 import { formatDate } from '@/lib/labels'
 import { useApiMutation } from '@/lib/query'
 import { useMeta } from '@/lib/use-meta'
+import { AUDIO_STATUS_KEY, generateAudio, playAudio, type GenerateBody, type GenerateResult } from '../audio/audio-api'
 import { MeaningLocaleEditor } from './meaning-locale-editor'
 import { highlightedText, locateTarget, type ExampleDetail, type MeaningDetail, type PublicationRevision, type TypeDetail, type WordDetail } from './words-api'
 
@@ -30,6 +32,19 @@ const exampleSchema = z.object({ sourceText: z.string().trim().min(1, 'Nhập c�
   .refine((e) => locateTarget(e.sourceText, e.target) !== null, { path: ['target'], message: 'Không tìm thấy trong câu ví dụ' })
 const EXAMPLE_FIELDS = [{ name: 'sourceText', label: 'Câu ví dụ', type: 'textarea' as const }, { name: 'target', label: 'Từ tô sáng', hint: 'Phải xuất hiện trong câu.' }]
 const PRONUNCIATION_FIELDS = [{ name: 'accentLocale', label: 'Accent' }, { name: 'ipa', label: 'IPA' }, { name: 'audioAssetKey', label: 'URL âm thanh' }]
+
+/** Live snapshots keep their old audio until republished, so say so when it matters. */
+function useGenerateAudio(wordKey: readonly unknown[], hasLive: boolean) {
+  return useApiMutation<GenerateBody, GenerateResult>({
+    mutationFn: generateAudio,
+    invalidate: [wordKey, AUDIO_STATUS_KEY],
+    onSuccess: ({ generated, failed }) => {
+      if (generated.length === 0 && failed.length === 0) return void toast.info('Không có phát âm nào cần tạo audio.')
+      if (generated.length > 0) toast.success(`Đã tạo ${generated.length} audio`, { description: hasLive ? 'Publish lại các nghĩa đang live để người học nghe audio mới.' : undefined })
+      if (failed.length > 0) toast.error(`${failed.length} audio bị lỗi`, { description: failed[0].message })
+    },
+  })
+}
 
 function PublicationHistory({ meaningId }: { meaningId: string }) {
   const [open, setOpen] = useState(false)
@@ -179,6 +194,8 @@ function TypeCard({ type, wordKey }: { type: TypeDetail; wordKey: readonly unkno
   const invalidate = [wordKey, ['words']]
   const hasPublication = type.meanings.some((m) => m.publications.length > 0)
   const removeType = useApiMutation({ mutationFn: () => api(`/admin/word-types/${type.id}`, { method: 'DELETE' }), invalidate, success: 'Đã xoá loại từ' })
+  const hasLive = type.meanings.some((m) => m.publications.some((p) => !p.recalledAt))
+  const voice = useGenerateAudio(wordKey, hasLive)
   const removePronunciation = useApiMutation<string>({ mutationFn: (id) => api(`/admin/pronunciations/${id}`, { method: 'DELETE' }), invalidate, success: 'Đã xoá phát âm' })
   const toBody = ({ accentLocale, ipa, audioAssetKey }: z.infer<typeof pronunciationSchema>) => ({ accentLocale, ipa: emptyToNull(ipa), audioAssetKey: emptyToNull(audioAssetKey) })
   const savePronunciation = useApiMutation<{ id?: string; values: z.infer<typeof pronunciationSchema> }>({
@@ -230,6 +247,21 @@ function TypeCard({ type, wordKey }: { type: TypeDetail; wordKey: readonly unkno
             <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm">
               <span>{p.accentLocale} · {p.ipa ?? <span className="text-destructive">Thiếu IPA</span>}{p.audioAssetKey && ' · có âm thanh'}</span>
               <div className="flex gap-1">
+                {p.audioAssetKey && (
+                  <Button variant="ghost" size="icon" aria-label={`Nghe ${p.accentLocale}`} onClick={() => playAudio(p.audioAssetKey!)}><Play /></Button>
+                )}
+                {p.accentLocale === meta.audioAccent && (
+                  <ConfirmAction
+                    variant="ghost"
+                    size="icon"
+                    ariaLabel={p.audioAssetKey ? 'Tạo lại audio' : 'Tạo audio'}
+                    label={<AudioLines />}
+                    title={p.audioAssetKey ? 'Tạo lại audio?' : 'Tạo audio?'}
+                    description={p.audioAssetKey ? 'Audio hiện tại sẽ bị thay bằng bản ElevenLabs mới. Việc này tốn credit.' : 'Gọi ElevenLabs để tạo audio cho phát âm này. Việc này tốn credit.'}
+                    confirmLabel="Tạo"
+                    onConfirm={() => voice.mutate({ pronunciationIds: [p.id], overwrite: true })}
+                  />
+                )}
                 <FormDialog
                   trigger={<Button variant="ghost" size="icon" aria-label="Sửa phát âm" />}
                   triggerLabel={<Pencil />}
@@ -289,6 +321,8 @@ export function WordDetailPage() {
     success: 'Đã xoá từ',
     onSuccess: () => navigate('/words'),
   })
+  const hasLive = word?.types.some((t) => t.meanings.some((m) => m.publications.some((p) => !p.recalledAt))) ?? false
+  const voice = useGenerateAudio(wordKey, hasLive)
   const addType = useApiMutation<z.infer<typeof typeSchema>>({
     mutationFn: (body) => api(`/admin/words/${id}/types`, { method: 'POST', body }),
     invalidate,
@@ -298,6 +332,7 @@ export function WordDetailPage() {
 
   if (!word) return <QueryState isLoading={isLoading} error={error} onRetry={() => void refetch()} />
   const usedPos = word.types.map((t) => t.partOfSpeech)
+  const missingAudio = word.types.some((t) => t.pronunciations.some((p) => p.accentLocale === meta.audioAccent && !p.audioAssetKey))
   return (
     <>
       <PageHeader
@@ -316,6 +351,11 @@ export function WordDetailPage() {
                 defaultValues={{ lemma: word.lemma, homographKey: word.homographKey ?? '' }}
                 onSubmit={(values) => patch.mutateAsync(values)}
               />
+            )}
+            {missingAudio && (
+              <Button variant="outline" size="sm" disabled={voice.isPending} onClick={() => voice.mutate({ wordIds: [id] })}>
+                <AudioLines /> {voice.isPending ? 'Đang tạo audio…' : 'Tạo audio còn thiếu'}
+              </Button>
             )}
             <FormDialog
               trigger={<Button variant="outline" size="sm" />}

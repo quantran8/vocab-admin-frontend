@@ -12,6 +12,7 @@ const MESSAGES: Record<string, string> = {
   PUBLICATION_INVALID: 'Chưa đủ điều kiện publish.',
   PAYLOAD_TOO_LARGE: 'Dữ liệu gửi lên quá lớn.',
   AUTH_PROVIDER_UNAVAILABLE: 'Dịch vụ xác thực tạm thời không dùng được.',
+  TTS_PROVIDER_UNAVAILABLE: 'Không tạo được âm thanh lúc này.',
   INTERNAL_ERROR: 'Lỗi máy chủ. Hãy thử lại sau.',
 }
 
@@ -33,6 +34,9 @@ const DETAILS: Record<string, string> = {
   'Only a draft can be deleted; archive it instead': 'Chỉ xoá được bản nháp. Hãy chuyển sang lưu trữ.',
   'The admin account cannot be changed': 'Không thể thay đổi tài khoản admin.',
   'SUPABASE_SERVICE_ROLE_KEY is not configured': 'Backend chưa cấu hình SUPABASE_SERVICE_ROLE_KEY.',
+  'ElevenLabs is not configured': 'Backend chưa cấu hình ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID hoặc ELEVENLABS_MODEL_ID.',
+  'Audio storage is not configured': 'Backend chưa cấu hình Cloudflare R2 (R2_*).',
+  'Use pronunciationIds or wordIds, not both': 'Chỉ chọn theo phát âm hoặc theo từ, không chọn cả hai.',
 }
 
 export function describeError(error: unknown): { title: string; detail?: string } {

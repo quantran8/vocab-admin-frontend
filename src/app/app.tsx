@@ -2,6 +2,7 @@ import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AiReviewPage } from '@/features/ai-review/ai-review-page'
+import { AudioPage } from '@/features/audio/audio-page'
 import { LoginPage } from '@/features/auth/login-page'
 import { isContentRole, isFullAdmin, useSession, useSessionRestore } from '@/features/auth/use-session'
 import { CatalogPage, CollectionPage, TopicPage } from '@/features/catalog/catalog-pages'
@@ -28,6 +29,7 @@ const router = createBrowserRouter(
         { path: 'words/new', element: <WordNewPage /> },
         { path: 'words/:id', element: <WordDetailPage /> },
         { path: 'ai-review', element: <AiReviewPage /> },
+        { path: 'audio', element: <AudioPage /> },
         { path: 'practice-items', element: <ItemsPage /> },
         { path: 'practice-items/new', element: <ItemNewPage /> },
         { path: 'practice-items/:id', element: <ItemDetailPage /> },

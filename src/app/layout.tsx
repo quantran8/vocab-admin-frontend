@@ -1,4 +1,4 @@
-import { BookOpen, Dumbbell, FolderTree, LogOut, Sparkles, Users } from 'lucide-react'
+import { AudioLines, BookOpen, Dumbbell, FolderTree, LogOut, Sparkles, Users } from 'lucide-react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,6 +11,7 @@ import { queryClient } from '@/lib/query'
 const NAV = [
   { to: '/words', label: 'Từ vựng', icon: BookOpen },
   { to: '/ai-review', label: 'Duyệt nghĩa AI', icon: Sparkles },
+  { to: '/audio', label: 'Âm thanh', icon: AudioLines },
   { to: '/practice-items', label: 'Bài luyện', icon: Dumbbell },
   { to: '/catalog', label: 'Catalog', icon: FolderTree },
 ]

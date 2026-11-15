@@ -32,6 +32,10 @@ Vite chuyển tiếp `/api` sang `VITE_DEV_BACKEND` (mặc định `http://local
 - Màn Người dùng chỉ dành cho `admin`, chỉ cấp hoặc gỡ được quyền `editor`, và cần `SUPABASE_SERVICE_ROLE_KEY` ở backend.
 - Giao diện đọc role chỉ để ẩn hiện chức năng. Backend mới là nơi kiểm tra quyền.
 
+## Âm thanh
+
+Màn Âm thanh tạo audio phát âm hàng loạt qua `POST /admin/audio/generate` của backend (ElevenLabs, lưu trên Cloudflare R2), chạy từng lượt tới khi hết phát âm thiếu audio. Trang chi tiết từ có nút nghe, tạo audio còn thiếu cho từ, và tạo lại audio cho từng phát âm. Nghĩa đang live chỉ phát audio mới sau khi publish lại.
+
 Quy tắc khoá và xoá nội dung nằm ở mục "Admin CRUD" trong `docs/DECISIONS.md` của backend.
 
 ## Deploy

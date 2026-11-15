@@ -15,6 +15,8 @@ export interface Meta {
   aiMeaningScopes: string[]
   adminRoles: string[]
   assignableRoles: string[]
+  /** The only accent the backend voices. */
+  audioAccent: string | null
 }
 
 export interface MeaningOption {

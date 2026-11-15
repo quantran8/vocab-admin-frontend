@@ -4,7 +4,7 @@ import type { Meta } from './types'
 
 const EMPTY: Meta = {
   locales: [], cefrLevels: [], partsOfSpeech: [], templateVariants: {}, editorialStates: [],
-  itemStatuses: [], contentStatuses: [], meaningOrigins: [], aiMeaningScopes: [], adminRoles: [], assignableRoles: [],
+  itemStatuses: [], contentStatuses: [], meaningOrigins: [], aiMeaningScopes: [], adminRoles: [], assignableRoles: [], audioAccent: null,
 }
 
 export function useMeta() {
