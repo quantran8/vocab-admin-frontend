@@ -72,4 +72,49 @@ describe('AudioPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Tạo đến hết' })).toBeEnabled())
     expect(calls).toBe(1)
   })
+
+  it('voices one word from the missing list', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.get(`${BASE}/admin/audio/status`, () => HttpResponse.json(status(1))),
+      http.get(`${BASE}/admin/audio/missing`, () => HttpResponse.json({
+        total: 1, items: [{ ...item(1), homographKey: null, partOfSpeech: 'verb', ipa: '/w/', live: true }],
+      })),
+      http.post(`${BASE}/admin/audio/generate`, async ({ request }) => {
+        bodies.push(await request.json())
+        return HttpResponse.json({ voice: 'v1', accent: 'en-US', generated: [{ ...item(1), audioUrl: 'https://cdn.test/1.mp3' }], failed: [], skippedIds: [], remaining: 0 })
+      }),
+    )
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Thiếu audio (1)' }))
+    expect(await screen.findByText('/w/')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Tạo' }))
+    await waitFor(() => expect(bodies).toEqual([{ pronunciationIds: ['p1'] }]))
+  })
+
+  it('republishes stale audio one by one or all at once', async () => {
+    const bodies: unknown[] = []
+    let remaining = 3
+    const row = (n: number) => ({ meaningId: `m${n}`, locale: 'vi-VN', wordId: `w${n}`, lemma: `word${n}`, partOfSpeech: 'verb', meaningText: `nghĩa ${n}`, revision: 1, publishedAt: '2026-01-01T00:00:00Z' })
+    server.use(
+      http.get(`${BASE}/admin/audio/status`, () => HttpResponse.json({ ...status(0), staleLivePublications: remaining })),
+      http.get(`${BASE}/admin/audio/stale-publications`, () => HttpResponse.json({ total: remaining, items: [row(1)] })),
+      http.post(`${BASE}/admin/audio/stale-publications/refresh`, async ({ request }) => {
+        const body = await request.json() as { publications?: unknown[] }
+        bodies.push(body)
+        const count = body.publications ? 1 : Math.min(2, remaining)
+        remaining -= count
+        return HttpResponse.json({ refreshed: Array.from({ length: count }, (_, i) => ({ meaningId: `m${i}`, locale: 'vi-VN', revision: 2 })), remaining })
+      }),
+    )
+    renderPage()
+    await userEvent.click(await screen.findByRole('tab', { name: 'Cần publish lại (3)' }))
+    expect(await screen.findByText('nghĩa 1')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Publish lại' }))
+    await waitFor(() => expect(bodies).toEqual([{ publications: [{ meaningId: 'm1', locale: 'vi-VN' }] }]))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Publish lại tất cả' }))
+    await waitFor(() => expect(remaining).toBe(0))
+    expect(bodies.slice(1)).toEqual([{}])
+  })
 })

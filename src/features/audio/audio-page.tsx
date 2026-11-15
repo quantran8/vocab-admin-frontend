@@ -9,9 +9,11 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api } from '@/lib/api'
 import { toastError } from '@/lib/query'
-import { AUDIO_STATUS_KEY, DEFAULT_BATCH, generateAudio, MAX_BATCH, playAudio, type AudioStatus, type FailedAudio, type GeneratedAudio } from './audio-api'
+import { MissingAudioList, StalePublicationsList } from './audio-lists'
+import { AUDIO_KEY, AUDIO_STATUS_KEY, DEFAULT_BATCH, generateAudio, MAX_BATCH, playAudio, type AudioStatus, type FailedAudio, type GeneratedAudio } from './audio-api'
 
 const LOG_SIZE = 100
 
@@ -79,7 +81,7 @@ export function AudioPage() {
       toastError(err)
     } finally {
       setRunning(false)
-      void client.invalidateQueries({ queryKey: AUDIO_STATUS_KEY })
+      void client.invalidateQueries({ queryKey: AUDIO_KEY })
       void client.invalidateQueries({ queryKey: ['word'] })
     }
   }
@@ -96,44 +98,55 @@ export function AudioPage() {
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="Chưa có audio" value={status.missing} hint={`Phát âm ${status.accent}`} />
           <Stat label="Đã có audio" value={status.withAudio} />
-          <Stat label="Nghĩa live cần publish lại" value={status.staleLivePublications} hint="Người học chỉ nghe audio mới sau khi publish lại." />
+          <Stat label="Nghĩa live cần publish lại" value={status.staleLivePublications} hint="Bản live vẫn phát audio cũ. Xem tab Cần publish lại." />
           <Stat label="Voice" value={status.voice || '—'} hint={status.voice ? undefined : 'Backend chưa cấu hình ELEVENLABS_VOICE_ID'} />
         </div>
       )}
 
-      <Card className="mb-6">
-        <CardHeader><CardTitle>Tạo audio còn thiếu</CardTitle></CardHeader>
-        <CardContent className="grid gap-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="audio-batch">Số phát âm mỗi lượt (tối đa {MAX_BATCH})</Label>
-              <Input id="audio-batch" className="w-32" type="number" min={1} max={MAX_BATCH} value={batch} disabled={running} onChange={(e) => setBatch(e.target.value)} />
-            </div>
-            <Button variant="outline" disabled={running || status?.missing === 0} onClick={() => void run(false)}>Tạo một lượt</Button>
-            {running ? (
-              <Button variant="destructive" onClick={() => { stopRef.current = true }}><Square /> Dừng sau lượt này</Button>
-            ) : (
-              <Button disabled={status?.missing === 0} onClick={() => void run(true)}>Tạo đến hết</Button>
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {running ? `Đang tạo… đã xong ${doneCount} audio trong lần chạy này.` : 'Mỗi phát âm là một lần gọi ElevenLabs và tốn credit. Các từ cùng chữ dùng chung một file.'}
-          </p>
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="generate">
+        <TabsList className="mb-4">
+          <TabsTrigger value="generate">Tạo hàng loạt</TabsTrigger>
+          <TabsTrigger value="missing">Thiếu audio{status ? ` (${status.missing})` : ''}</TabsTrigger>
+          <TabsTrigger value="stale">Cần publish lại{status ? ` (${status.staleLivePublications})` : ''}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="missing"><MissingAudioList /></TabsContent>
+        <TabsContent value="stale"><StalePublicationsList /></TabsContent>
+        <TabsContent value="generate">
+          <Card className="mb-6">
+            <CardHeader><CardTitle>Tạo audio còn thiếu</CardTitle></CardHeader>
+            <CardContent className="grid gap-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="audio-batch">Số phát âm mỗi lượt (tối đa {MAX_BATCH})</Label>
+                  <Input id="audio-batch" className="w-32" type="number" min={1} max={MAX_BATCH} value={batch} disabled={running} onChange={(e) => setBatch(e.target.value)} />
+                </div>
+                <Button variant="outline" disabled={running || status?.missing === 0} onClick={() => void run(false)}>Tạo một lượt</Button>
+                {running ? (
+                  <Button variant="destructive" onClick={() => { stopRef.current = true }}><Square /> Dừng sau lượt này</Button>
+                ) : (
+                  <Button disabled={status?.missing === 0} onClick={() => void run(true)}>Tạo đến hết</Button>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {running ? `Đang tạo… đã xong ${doneCount} audio trong lần chạy này.` : 'Mỗi phát âm là một lần gọi ElevenLabs và tốn credit. Các từ cùng chữ dùng chung một file.'}
+              </p>
+            </CardContent>
+          </Card>
 
-      {failed.length > 0 && (
-        <section className="mb-6 grid gap-2">
-          <h2 className="font-medium text-destructive">Lỗi ({failed.length})</h2>
-          <DataTable columns={FAILED_COLUMNS} rows={failed} rowKey={(f) => f.pronunciationId} />
-        </section>
-      )}
-      <section className="grid gap-2">
-        <h2 className="font-medium">Vừa tạo</h2>
-        {generated.length === 0
-          ? <EmptyState>Chưa tạo audio nào trong phiên này.</EmptyState>
-          : <DataTable columns={GENERATED_COLUMNS} rows={generated} rowKey={(g) => g.pronunciationId} />}
-      </section>
+          {failed.length > 0 && (
+            <section className="mb-6 grid gap-2">
+              <h2 className="font-medium text-destructive">Lỗi ({failed.length})</h2>
+              <DataTable columns={FAILED_COLUMNS} rows={failed} rowKey={(f) => f.pronunciationId} />
+            </section>
+          )}
+          <section className="grid gap-2">
+            <h2 className="font-medium">Vừa tạo</h2>
+            {generated.length === 0
+              ? <EmptyState>Chưa tạo audio nào trong phiên này.</EmptyState>
+              : <DataTable columns={GENERATED_COLUMNS} rows={generated} rowKey={(g) => g.pronunciationId} />}
+          </section>
+        </TabsContent>
+      </Tabs>
     </>
   )
 }
