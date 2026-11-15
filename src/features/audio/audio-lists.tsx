@@ -21,7 +21,7 @@ const wordLink = (row: { wordId: string; lemma: string }) => (
   <Link className="font-medium underline-offset-4 hover:underline" to={`/words/${row.wordId}`}>{row.lemma}</Link>
 )
 
-export function MissingAudioList() {
+export function MissingAudioList({ voiceId }: { voiceId?: string }) {
   const [search, setSearch] = useState('')
   const [offset, setOffset] = useState(0)
   const q = useDebounced(search.trim())
@@ -30,7 +30,7 @@ export function MissingAudioList() {
     queryFn: () => api<Page<MissingAudio>>('/admin/audio/missing', { query: { q, limit: LIMIT, offset } }),
   })
   const voice = useApiMutation<string, Awaited<ReturnType<typeof generateAudio>>>({
-    mutationFn: (pronunciationId) => generateAudio({ pronunciationIds: [pronunciationId] }),
+    mutationFn: (pronunciationId) => generateAudio({ pronunciationIds: [pronunciationId], voiceId }),
     invalidate: [AUDIO_KEY, ['word']],
     onSuccess: ({ generated, failed }) => {
       if (generated.length > 0) toast.success(`Đã tạo audio cho "${generated[0].lemma}"`)
@@ -44,16 +44,23 @@ export function MissingAudioList() {
       cell: (m) => <>{wordLink(m)}{m.homographKey && <span className="ml-1 text-muted-foreground">({m.homographKey})</span>}</>,
     },
     { id: 'pos', header: 'Loại từ', cell: (m) => <Badge variant="outline">{m.partOfSpeech}</Badge> },
-    { id: 'ipa', header: 'IPA', cell: (m) => m.ipa ?? '—' },
-    { id: 'live', header: 'Đang live', cell: (m) => (m.live ? <Badge>Đang live</Badge> : null) },
+    { id: 'meaning', header: 'Nghĩa', cell: (m) => <span className="line-clamp-2 text-sm text-muted-foreground">{m.definition ?? '—'}</span> },
+    { id: 'ipa', header: 'IPA', cell: (m) => m.ipa ?? <Badge variant="destructive">Thiếu IPA</Badge> },
+    {
+      id: 'state',
+      header: '',
+      cell: (m) => <div className="flex gap-1">{m.live && <Badge>Đang live</Badge>}{m.isPrivate && <Badge variant="outline">Riêng</Badge>}</div>,
+    },
     {
       id: 'action',
       header: '',
-      cell: (m) => (
+      cell: (m) => (m.ipa ? (
         <Button variant="ghost" size="sm" disabled={voice.isPending} onClick={() => voice.mutate(m.pronunciationId)}>
           <AudioLines /> Tạo
         </Button>
-      ),
+      ) : (
+        <Link className="text-sm underline-offset-4 hover:underline" to={`/words/${m.wordId}`}>Thêm IPA</Link>
+      )),
     },
   ], [voice])
 
@@ -91,7 +98,7 @@ export function StalePublicationsList() {
   const refreshOne = useApiMutation<PublicationKey>({
     mutationFn: (key) => refreshPublications([key]),
     invalidate: [AUDIO_KEY, ['word']],
-    success: 'Đã publish lại audio',
+    success: 'Đã publish lại IPA và audio',
   })
 
   async function refreshAll() {
@@ -135,7 +142,7 @@ export function StalePublicationsList() {
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Bản live của các nghĩa này vẫn phát audio cũ hoặc chưa có audio. Publish lại chỉ cập nhật audio; các chỉnh sửa khác chưa publish vẫn giữ nguyên.
+          Bản live của các nghĩa này còn IPA cũ, audio cũ hoặc chưa có audio. Publish lại chỉ cập nhật IPA và audio; các chỉnh sửa khác chưa publish vẫn giữ nguyên.
         </p>
         <Button disabled={running || !data?.total} onClick={() => void refreshAll()}>
           <Send /> {running ? 'Đang publish lại…' : 'Publish lại tất cả'}

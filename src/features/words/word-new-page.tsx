@@ -25,25 +25,24 @@ const schema = z.object({
   homographKey: z.string().trim(),
   types: z.array(z.object({
     partOfSpeech: z.string().min(1, 'Chọn loại từ'),
-    accentLocale: z.string().trim().min(2, 'Nhập accent'),
-    ipa: z.string().trim(),
-    meanings: z.array(z.object({ cefrLevel: z.string().nullable(), coreDefinition: z.string().trim(), examples: z.array(example) })).min(1),
+    // IPA is per meaning: senses of one spelling can sound different (read /riːd/, /rɛd/).
+    meanings: z.array(z.object({ cefrLevel: z.string().nullable(), ipa: z.string().trim(), coreDefinition: z.string().trim(), examples: z.array(example) })).min(1),
   })).min(1).refine((types) => new Set(types.map((t) => t.partOfSpeech)).size === types.length, 'Mỗi loại từ chỉ xuất hiện một lần'),
 })
 type Values = z.infer<typeof schema>
 
-const emptyMeaning = () => ({ cefrLevel: null, coreDefinition: '', examples: [{ sourceText: '', target: '' }] })
-const emptyType = () => ({ partOfSpeech: '', accentLocale: 'en-US', ipa: '', meanings: [emptyMeaning()] })
+const emptyMeaning = () => ({ cefrLevel: null, ipa: '', coreDefinition: '', examples: [{ sourceText: '', target: '' }] })
+const emptyType = () => ({ partOfSpeech: '', meanings: [emptyMeaning()] })
 
-function toRequest(values: Values) {
+function toRequest(values: Values, accentLocale: string) {
   return {
     lemma: values.lemma,
     ...(values.homographKey && { homographKey: values.homographKey }),
     types: values.types.map((type) => ({
       partOfSpeech: type.partOfSpeech,
-      pronunciations: [{ accentLocale: type.accentLocale, ...(type.ipa && { ipa: type.ipa }) }],
       meanings: type.meanings.map((meaning) => ({
         ...(meaning.cefrLevel && { cefrLevel: meaning.cefrLevel }),
+        pronunciations: [{ accentLocale, ...(meaning.ipa && { ipa: meaning.ipa }) }],
         ...(meaning.coreDefinition && { coreDefinition: meaning.coreDefinition }),
         examples: meaning.examples.map((e) => ({ sourceText: e.sourceText, targetLocator: locateTarget(e.sourceText, e.target) })),
       })),
@@ -95,7 +94,7 @@ function MeaningsFields({ control, register, errors, typeIndex }: NestedProps) {
             <p className="text-sm font-medium">Nghĩa {index + 1}</p>
             {fields.length > 1 && <Button type="button" variant="ghost" size="icon" aria-label="Xoá nghĩa" onClick={() => remove(index)}><Trash2 /></Button>}
           </div>
-          <div className="grid gap-3 sm:grid-cols-[10rem_1fr]">
+          <div className="grid gap-3 sm:grid-cols-[10rem_10rem_1fr]">
             <div className="grid gap-1.5">
               <Label>CEFR</Label>
               <Controller
@@ -103,6 +102,10 @@ function MeaningsFields({ control, register, errors, typeIndex }: NestedProps) {
                 name={`types.${typeIndex}.meanings.${index}.cefrLevel`}
                 render={({ field: cefr }) => <AppSelect options={toOptions(meta.cefrLevels)} value={cefr.value} onChange={cefr.onChange} clearLabel="Chưa chọn" />}
               />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor={`ipa-${typeIndex}-${index}`}>IPA ({meta.audioAccent ?? 'en-US'})</Label>
+              <Input id={`ipa-${typeIndex}-${index}`} placeholder="/ˈbæŋk/" {...register(`types.${typeIndex}.meanings.${index}.ipa`)} />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`def-${typeIndex}-${index}`}>Định nghĩa gốc (tuỳ chọn)</Label>
@@ -131,7 +134,7 @@ export function WordNewPage() {
   const submit = handleSubmit(async (values) => {
     setFormError(null)
     try {
-      const { wordId } = await api<{ wordId: string }>('/admin/words', { method: 'POST', body: toRequest(values) })
+      const { wordId } = await api<{ wordId: string }>('/admin/words', { method: 'POST', body: toRequest(values, meta.audioAccent ?? 'en-US') })
       await client.invalidateQueries({ queryKey: ['words'] })
       navigate(`/words/${wordId}`)
     } catch (error) {
@@ -176,15 +179,6 @@ export function WordNewPage() {
                     render={({ field: pos }) => <AppSelect options={toOptions(meta.partsOfSpeech)} value={pos.value || null} onChange={(v) => pos.onChange(v ?? '')} placeholder="Chọn" />}
                   />
                   <FieldError message={errors.types?.[index]?.partOfSpeech?.message} />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor={`accent-${index}`}>Accent</Label>
-                  <Input id={`accent-${index}`} {...register(`types.${index}.accentLocale`)} />
-                  <FieldError message={errors.types?.[index]?.accentLocale?.message} />
-                </div>
-                <div className="grid gap-1.5">
-                  <Label htmlFor={`ipa-${index}`}>IPA</Label>
-                  <Input id={`ipa-${index}`} {...register(`types.${index}.ipa`)} />
                 </div>
               </div>
               <MeaningsFields control={control} register={register} errors={errors} typeIndex={index} />

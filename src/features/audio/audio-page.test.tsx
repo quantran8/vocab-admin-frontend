@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
@@ -9,8 +9,10 @@ import { AudioPage } from './audio-page'
 
 const BASE = 'http://api.test'
 const server = setupServer()
-const status = (missing: number) => ({ voice: 'v1', accent: 'en-US', missing, withAudio: 7, staleLivePublications: 1 })
-const item = (n: number) => ({ pronunciationId: `p${n}`, wordId: `w${n}`, lemma: `word${n}` })
+const status = (missing: number) => ({
+  voice: 'v1', voices: [{ id: 'v1', name: 'Rachel' }, { id: 'v2', name: 'Adam' }], accent: 'en-US', missing, missingIpa: 2, withAudio: 7, staleLivePublications: 1,
+})
+const item = (n: number) => ({ pronunciationId: `p${n}`, meaningId: `m${n}`, wordId: `w${n}`, lemma: `word${n}`, ipa: `/w${n}/` })
 
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -52,7 +54,7 @@ describe('AudioPage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Tạo đến hết' }))
 
     await waitFor(() => expect(bodies).toHaveLength(2))
-    expect(bodies).toEqual([{ limit: 2 }, { limit: 2 }])
+    expect(bodies).toEqual([{ limit: 2, voiceId: 'v1' }, { limit: 2, voiceId: 'v1' }])
     expect(await screen.findByRole('link', { name: 'word2' })).toBeInTheDocument()
     expect(screen.getByText('ElevenLabs returned 429')).toBeInTheDocument()
   })
@@ -78,7 +80,10 @@ describe('AudioPage', () => {
     server.use(
       http.get(`${BASE}/admin/audio/status`, () => HttpResponse.json(status(1))),
       http.get(`${BASE}/admin/audio/missing`, () => HttpResponse.json({
-        total: 1, items: [{ ...item(1), homographKey: null, partOfSpeech: 'verb', ipa: '/w/', live: true }],
+        total: 2, items: [
+          { ...item(1), homographKey: null, partOfSpeech: 'verb', ipa: '/w/', definition: 'to try', isPrivate: false, live: true },
+          { ...item(2), homographKey: null, partOfSpeech: 'noun', ipa: null, definition: null, isPrivate: true, live: false },
+        ],
       })),
       http.post(`${BASE}/admin/audio/generate`, async ({ request }) => {
         bodies.push(await request.json())
@@ -89,7 +94,11 @@ describe('AudioPage', () => {
     await userEvent.click(await screen.findByRole('tab', { name: 'Thiếu audio (1)' }))
     expect(await screen.findByText('/w/')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Tạo' }))
-    await waitFor(() => expect(bodies).toEqual([{ pronunciationIds: ['p1'] }]))
+    await waitFor(() => expect(bodies).toEqual([{ pronunciationIds: ['p1'], voiceId: 'v1' }]))
+    // Without IPA there is nothing to voice: the row sends the editor to add one.
+    expect(within(screen.getByRole('table')).getByText('Thiếu IPA')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Thêm IPA' })).toHaveAttribute('href', '/words/w2')
+    expect(screen.getAllByRole('button', { name: 'Tạo' })).toHaveLength(1)
   })
 
   it('republishes stale audio one by one or all at once', async () => {

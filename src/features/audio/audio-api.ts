@@ -6,26 +6,38 @@ export const AUDIO_STATUS_KEY = ['audio', 'status'] as const
 export const MAX_BATCH = 50
 export const DEFAULT_BATCH = 20
 
+export interface Voice {
+  id: string
+  name: string
+}
+
 export interface AudioStatus {
+  /** The default voice; `voices` lists every one an admin may pick, default first. */
   voice: string
+  voices: Voice[]
   accent: string
+  /** Pronunciations with IPA but no audio: these can be voiced. */
   missing: number
+  /** No audio and no IPA: add the IPA first, audio is voiced from it. */
+  missingIpa: number
   withAudio: number
   /** Live meanings whose published snapshot still lacks the current audio: they need a republish. */
   staleLivePublications: number
 }
 
-export interface GeneratedAudio {
+interface AudioTargetView {
   pronunciationId: string
+  meaningId: string
   wordId: string
   lemma: string
+  ipa: string
+}
+
+export interface GeneratedAudio extends AudioTargetView {
   audioUrl: string
 }
 
-export interface FailedAudio {
-  pronunciationId: string
-  wordId: string
-  lemma: string
+export interface FailedAudio extends AudioTargetView {
   message: string
 }
 
@@ -43,16 +55,23 @@ export interface GenerateBody {
   wordIds?: string[]
   overwrite?: boolean
   limit?: number
+  /** Omitted: the backend's default voice. */
+  voiceId?: string
 }
 
 export interface MissingAudio {
   pronunciationId: string
+  meaningId: string
   wordId: string
   lemma: string
   homographKey: string | null
   partOfSpeech: string
+  /** Null: cannot be voiced until an IPA is added. */
   ipa: string | null
-  /** The word type has a live meaning, so learners are missing this audio now. */
+  definition: string | null
+  /** A learner's own meaning (custom word). */
+  isPrivate: boolean
+  /** The meaning is live, so learners are missing this audio now. */
   live: boolean
 }
 

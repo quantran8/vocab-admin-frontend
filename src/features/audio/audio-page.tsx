@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { AppSelect } from '@/components/app-select'
 import { api } from '@/lib/api'
 import { toastError } from '@/lib/query'
 import { MissingAudioList, StalePublicationsList } from './audio-lists'
@@ -23,6 +24,7 @@ const wordLink = (row: { wordId: string; lemma: string }) => (
 
 const GENERATED_COLUMNS: Column<GeneratedAudio>[] = [
   { id: 'lemma', header: 'Từ', cell: wordLink },
+  { id: 'ipa', header: 'IPA', cell: (g) => g.ipa },
   {
     id: 'play',
     header: 'Nghe',
@@ -32,6 +34,7 @@ const GENERATED_COLUMNS: Column<GeneratedAudio>[] = [
 
 const FAILED_COLUMNS: Column<FailedAudio>[] = [
   { id: 'lemma', header: 'Từ', cell: wordLink },
+  { id: 'ipa', header: 'IPA', cell: (f) => f.ipa },
   { id: 'message', header: 'Lỗi', cell: (f) => <span className="text-sm text-muted-foreground">{f.message}</span> },
 ]
 
@@ -51,6 +54,9 @@ export function AudioPage() {
   const client = useQueryClient()
   const { data: status, isLoading, error, refetch } = useQuery({ queryKey: AUDIO_STATUS_KEY, queryFn: () => api<AudioStatus>('/admin/audio/status') })
   const [batch, setBatch] = useState(String(DEFAULT_BATCH))
+  // Null follows the backend default, so the page never sends a voice it was not offered.
+  const [pickedVoice, setPickedVoice] = useState<string | null>(null)
+  const voiceId = pickedVoice ?? status?.voice
   const [running, setRunning] = useState(false)
   const [generated, setGenerated] = useState<GeneratedAudio[]>([])
   const [failed, setFailed] = useState<FailedAudio[]>([])
@@ -66,7 +72,7 @@ export function AudioPage() {
     let total = 0
     try {
       for (;;) {
-        const result = await generateAudio({ limit })
+        const result = await generateAudio({ limit, voiceId })
         total += result.generated.length
         setDoneCount(total)
         setGenerated((prev) => [...result.generated, ...prev].slice(0, LOG_SIZE))
@@ -96,10 +102,10 @@ export function AudioPage() {
       <QueryState isLoading={isLoading} error={error} onRetry={() => void refetch()} />
       {status && (
         <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="Chưa có audio" value={status.missing} hint={`Phát âm ${status.accent}`} />
+          <Stat label="Chưa có audio" value={status.missing} hint={`Phát âm ${status.accent} đã có IPA`} />
+          <Stat label="Thiếu IPA" value={status.missingIpa} hint="Audio được tạo từ IPA nên cần thêm IPA trước." />
           <Stat label="Đã có audio" value={status.withAudio} />
           <Stat label="Nghĩa live cần publish lại" value={status.staleLivePublications} hint="Bản live vẫn phát audio cũ. Xem tab Cần publish lại." />
-          <Stat label="Voice" value={status.voice || '—'} hint={status.voice ? undefined : 'Backend chưa cấu hình ELEVENLABS_VOICE_ID'} />
         </div>
       )}
 
@@ -109,13 +115,25 @@ export function AudioPage() {
           <TabsTrigger value="missing">Thiếu audio{status ? ` (${status.missing})` : ''}</TabsTrigger>
           <TabsTrigger value="stale">Cần publish lại{status ? ` (${status.staleLivePublications})` : ''}</TabsTrigger>
         </TabsList>
-        <TabsContent value="missing"><MissingAudioList /></TabsContent>
+        <TabsContent value="missing"><MissingAudioList voiceId={voiceId} /></TabsContent>
         <TabsContent value="stale"><StalePublicationsList /></TabsContent>
         <TabsContent value="generate">
           <Card className="mb-6">
             <CardHeader><CardTitle>Tạo audio còn thiếu</CardTitle></CardHeader>
             <CardContent className="grid gap-4">
               <div className="flex flex-wrap items-end gap-3">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="audio-voice">Voice</Label>
+                  <AppSelect
+                    id="audio-voice"
+                    className="w-56"
+                    disabled={running || !status?.voices.length}
+                    options={(status?.voices ?? []).map((v) => ({ value: v.id, label: v.id === status?.voice ? `${v.name} (mặc định)` : v.name }))}
+                    value={voiceId ?? null}
+                    onChange={setPickedVoice}
+                    placeholder="Chưa cấu hình voice"
+                  />
+                </div>
                 <div className="grid gap-1.5">
                   <Label htmlFor="audio-batch">Số phát âm mỗi lượt (tối đa {MAX_BATCH})</Label>
                   <Input id="audio-batch" className="w-32" type="number" min={1} max={MAX_BATCH} value={batch} disabled={running} onChange={(e) => setBatch(e.target.value)} />
@@ -128,7 +146,7 @@ export function AudioPage() {
                 )}
               </div>
               <p className="text-sm text-muted-foreground">
-                {running ? `Đang tạo… đã xong ${doneCount} audio trong lần chạy này.` : 'Mỗi phát âm là một lần gọi ElevenLabs và tốn credit. Các từ cùng chữ dùng chung một file.'}
+                {running ? `Đang tạo… đã xong ${doneCount} audio trong lần chạy này.` : 'Audio được đọc từ IPA của từng nghĩa. Mỗi IPA chỉ gọi ElevenLabs một lần cho mỗi voice; các nghĩa trùng IPA dùng chung file.'}
               </p>
             </CardContent>
           </Card>
