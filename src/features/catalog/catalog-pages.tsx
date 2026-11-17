@@ -27,7 +27,23 @@ const entrySchema = z.object({
   title: z.string().trim().min(1, 'Nhập tiêu đề'),
   status: z.string(),
 })
-type Entry = z.infer<typeof entrySchema>
+const HEX = /^#[0-9a-fA-F]{6}$/
+const SF_SYMBOL = /^[a-z0-9]+(\.[a-z0-9]+)*$/
+const collectionSchema = entrySchema.extend({
+  color: z.string().trim().refine((v) => v === '' || HEX.test(v), 'Dùng dạng #RRGGBB').transform((v) => (v ? v.toUpperCase() : null)),
+})
+type CollectionEntry = z.output<typeof collectionSchema>
+const topicSchema = entrySchema.extend({
+  iosIcon: z.string().trim().refine((v) => v === '' || SF_SYMBOL.test(v), 'Tên SF Symbol chỉ gồm chữ thường, số và dấu chấm').transform((v) => v || null),
+})
+type TopicEntry = z.output<typeof topicSchema>
+// The iOS app's collection mark colours (DesignSystem/Tokens/Colors.swift).
+const APP_COLORS = [
+  { value: '#2F9BF4', label: 'Xanh dương (Everyday)' },
+  { value: '#F0458A', label: 'Hồng (IELTS)' },
+  { value: '#14B8A6', label: 'Xanh ngọc (Business)' },
+  { value: '#FF8A1F', label: 'Cam (TOEIC)' },
+]
 const localeSchema = z.object({ locale: z.string({ error: 'Chọn locale' }).min(1, 'Chọn locale'), title: z.string().trim().min(1, 'Nhập tiêu đề'), description: z.string() })
 type LocaleValues = z.infer<typeof localeSchema>
 
@@ -41,6 +57,7 @@ interface CollectionRow {
   slug: string
   title: string
   status: string
+  color: string | null
   topicCount: number
   locales: string[]
 }
@@ -49,6 +66,7 @@ interface TopicRow {
   slug: string
   title: string
   status: string
+  iosIcon: string | null
   meaningCount: number
   locales: string[]
 }
@@ -57,6 +75,7 @@ interface CollectionDetail {
   slug: string
   title: string
   status: string
+  color: string | null
   localizations: Localization[]
   topics: TopicRow[]
 }
@@ -66,6 +85,7 @@ interface TopicDetail {
   slug: string
   title: string
   status: string
+  iosIcon: string | null
   localizations: Localization[]
 }
 interface TopicMeaning {
@@ -86,6 +106,19 @@ function useEntryFields() {
     { name: 'slug', label: 'Slug', hint: slugMessage },
     { name: 'status', label: 'Trạng thái', type: 'select' as const, options: toOptions(meta.contentStatuses, statusLabel) },
   ]
+}
+
+function useCollectionFields() {
+  return [...useEntryFields(), { name: 'color', label: 'Màu', type: 'color' as const, presets: APP_COLORS, hint: 'Màu chấm và thanh tiến độ của collection trên app. Bỏ trống thì app dùng màu mặc định.' }]
+}
+
+function useTopicFields() {
+  return [...useEntryFields(), { name: 'iosIcon', label: 'Icon iOS', hint: 'Tên SF Symbol, ví dụ airplane.departure (tra trong app SF Symbols của Apple). Bỏ trống hoặc sai tên thì app dùng icon mặc định.' }]
+}
+
+function ColorDot({ color }: { color: string | null }) {
+  if (!color) return <span className="text-muted-foreground">—</span>
+  return <span className="inline-flex items-center gap-1.5 font-mono text-xs"><span className="size-3 rounded-full" style={{ backgroundColor: color }} />{color}</span>
 }
 
 function LocalizationsCard({ basePath, localizations, invalidate }: { basePath: string; localizations: Localization[]; invalidate: readonly (readonly unknown[])[] }) {
@@ -148,13 +181,13 @@ function LocalizationsCard({ basePath, localizations, invalidate }: { basePath: 
 }
 
 export function CatalogPage() {
-  const fields = useEntryFields()
+  const fields = useCollectionFields()
   const [offset, setOffset] = useState(0)
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['collections', offset],
     queryFn: () => api<Page<CollectionRow>>('/admin/collections', { query: { limit: LIMIT, offset } }),
   })
-  const create = useApiMutation<Entry>({
+  const create = useApiMutation<CollectionEntry>({
     mutationFn: (body) => api('/admin/collections', { method: 'POST', body }),
     invalidate: [['collections']],
     success: 'Đã tạo collection',
@@ -164,6 +197,7 @@ export function CatalogPage() {
     { id: 'title', header: 'Collection', cell: (c) => <Link className="font-medium underline-offset-4 hover:underline" to={`/catalog/collections/${c.id}`}>{c.title}</Link> },
     { id: 'slug', header: 'Slug', cell: (c) => c.slug },
     { id: 'status', header: 'Trạng thái', cell: (c) => <StatusBadge status={c.status} /> },
+    { id: 'color', header: 'Màu', cell: (c) => <ColorDot color={c.color} /> },
     { id: 'topics', header: 'Topic', cell: (c) => c.topicCount },
     { id: 'locales', header: 'Bản dịch', cell: (c) => <div className="flex flex-wrap gap-1">{c.locales.map((l) => <Badge key={l} variant="outline">{l}</Badge>)}</div> },
   ], [])
@@ -177,9 +211,9 @@ export function CatalogPage() {
             trigger={<Button />}
             triggerLabel={<><Plus /> Tạo collection</>}
             title="Tạo collection"
-            schema={entrySchema}
+            schema={collectionSchema}
             fields={fields}
-            defaultValues={{ slug: '', title: '', status: 'draft' }}
+            defaultValues={{ slug: '', title: '', status: 'draft', color: '' }}
             onSubmit={(values) => create.mutateAsync(values)}
           />
         }
@@ -198,22 +232,24 @@ export function CatalogPage() {
 export function CollectionPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
-  const fields = useEntryFields()
+  const fields = useCollectionFields()
+  const topicFields = useTopicFields()
   const key = ['collection', id] as const
   const { data, isLoading, error, refetch } = useQuery({ queryKey: key, queryFn: () => api<CollectionDetail>(`/admin/collections/${id}`) })
   const invalidate = [key, ['collections']]
-  const patch = useApiMutation<Entry>({ mutationFn: (body) => api(`/admin/collections/${id}`, { method: 'PATCH', body }), invalidate, success: 'Đã lưu collection', silent: true })
+  const patch = useApiMutation<CollectionEntry>({ mutationFn: (body) => api(`/admin/collections/${id}`, { method: 'PATCH', body }), invalidate, success: 'Đã lưu collection', silent: true })
   const remove = useApiMutation({
     mutationFn: () => api(`/admin/collections/${id}`, { method: 'DELETE' }),
     invalidate: [['collections']],
     success: 'Đã xoá collection',
     onSuccess: () => navigate('/catalog'),
   })
-  const createTopic = useApiMutation<Entry>({ mutationFn: (body) => api(`/admin/collections/${id}/topics`, { method: 'POST', body }), invalidate, success: 'Đã tạo topic', silent: true })
+  const createTopic = useApiMutation<TopicEntry>({ mutationFn: (body) => api(`/admin/collections/${id}/topics`, { method: 'POST', body }), invalidate, success: 'Đã tạo topic', silent: true })
   const columns = useMemo<Column<TopicRow>[]>(() => [
     { id: 'title', header: 'Topic', cell: (t) => <Link className="font-medium underline-offset-4 hover:underline" to={`/catalog/topics/${t.id}`}>{t.title}</Link> },
     { id: 'slug', header: 'Slug', cell: (t) => t.slug },
     { id: 'status', header: 'Trạng thái', cell: (t) => <StatusBadge status={t.status} /> },
+    { id: 'iosIcon', header: 'Icon iOS', cell: (t) => t.iosIcon ? <span className="font-mono text-xs">{t.iosIcon}</span> : <span className="text-muted-foreground">—</span> },
     { id: 'meanings', header: 'Nghĩa', cell: (t) => t.meaningCount },
     { id: 'locales', header: 'Bản dịch', cell: (t) => <div className="flex flex-wrap gap-1">{t.locales.map((l) => <Badge key={l} variant="outline">{l}</Badge>)}</div> },
   ], [])
@@ -222,7 +258,7 @@ export function CollectionPage() {
     <>
       <PageHeader
         title={data.title}
-        description={<span className="inline-flex items-center gap-2">{data.slug} <StatusBadge status={data.status} /></span>}
+        description={<span className="inline-flex items-center gap-2">{data.slug} <StatusBadge status={data.status} /> <ColorDot color={data.color} /></span>}
         back="/catalog"
         actions={
           <>
@@ -230,9 +266,9 @@ export function CollectionPage() {
               trigger={<Button variant="outline" size="sm" />}
               triggerLabel={<><Pencil /> Sửa</>}
               title="Sửa collection"
-              schema={entrySchema}
+              schema={collectionSchema}
               fields={fields}
-              defaultValues={{ slug: data.slug, title: data.title, status: data.status }}
+              defaultValues={{ slug: data.slug, title: data.title, status: data.status, color: data.color ?? '' }}
               onSubmit={(values) => patch.mutateAsync(values)}
             />
             {data.status === 'draft' && (
@@ -250,9 +286,9 @@ export function CollectionPage() {
               trigger={<Button variant="outline" size="sm" />}
               triggerLabel={<><Plus /> Tạo topic</>}
               title="Tạo topic"
-              schema={entrySchema}
-              fields={fields}
-              defaultValues={{ slug: '', title: '', status: 'draft' }}
+              schema={topicSchema}
+              fields={topicFields}
+              defaultValues={{ slug: '', title: '', status: 'draft', iosIcon: '' }}
               onSubmit={(values) => createTopic.mutateAsync(values)}
             />
           </CardHeader>
@@ -266,14 +302,14 @@ export function CollectionPage() {
 export function TopicPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
-  const fields = useEntryFields()
+  const fields = useTopicFields()
   const key = ['topic', id] as const
   const meaningsKey = ['topic-meanings', id] as const
   const topic = useQuery({ queryKey: key, queryFn: () => api<TopicDetail>(`/admin/topics/${id}`) })
   const meanings = useQuery({ queryKey: meaningsKey, queryFn: () => api<{ items: TopicMeaning[] }>(`/admin/topics/${id}/meanings`) })
   const collectionKey = ['collection', topic.data?.collectionId]
   const invalidate = [key, collectionKey]
-  const patch = useApiMutation<Entry>({ mutationFn: (body) => api(`/admin/topics/${id}`, { method: 'PATCH', body }), invalidate, success: 'Đã lưu topic', silent: true })
+  const patch = useApiMutation<TopicEntry>({ mutationFn: (body) => api(`/admin/topics/${id}`, { method: 'PATCH', body }), invalidate, success: 'Đã lưu topic', silent: true })
   const remove = useApiMutation({
     mutationFn: () => api(`/admin/topics/${id}`, { method: 'DELETE' }),
     invalidate: [collectionKey],
@@ -308,7 +344,7 @@ export function TopicPage() {
     <>
       <PageHeader
         title={data.title}
-        description={<span className="inline-flex items-center gap-2">{data.slug} <StatusBadge status={data.status} /></span>}
+        description={<span className="inline-flex items-center gap-2">{data.slug} <StatusBadge status={data.status} />{data.iosIcon && <span className="font-mono text-xs">{data.iosIcon}</span>}</span>}
         back={`/catalog/collections/${data.collectionId}`}
         actions={
           <>
@@ -316,9 +352,9 @@ export function TopicPage() {
               trigger={<Button variant="outline" size="sm" />}
               triggerLabel={<><Pencil /> Sửa</>}
               title="Sửa topic"
-              schema={entrySchema}
+              schema={topicSchema}
               fields={fields}
-              defaultValues={{ slug: data.slug, title: data.title, status: data.status }}
+              defaultValues={{ slug: data.slug, title: data.title, status: data.status, iosIcon: data.iosIcon ?? '' }}
               onSubmit={(values) => patch.mutateAsync(values)}
             />
             {data.status === 'draft' && (
