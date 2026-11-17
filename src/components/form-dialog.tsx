@@ -15,8 +15,10 @@ import type { Option } from '@/lib/form-utils'
 export interface FieldConfig {
   name: string
   label: string
-  type?: 'text' | 'textarea' | 'select'
+  type?: 'text' | 'textarea' | 'select' | 'color'
   options?: Option[]
+  /** Swatches offered by a color field. */
+  presets?: Option[]
   clearLabel?: string
   hint?: string
 }
@@ -86,6 +88,12 @@ export function FormDialog<T extends FieldValues>({ trigger, triggerLabel, title
                       <AppSelect id={id} options={field.options ?? []} value={(control.value as string | null) ?? null} onChange={control.onChange} clearLabel={field.clearLabel} placeholder="Chọn" />
                     )}
                   />
+                ) : field.type === 'color' ? (
+                  <Controller
+                    control={form.control}
+                    name={field.name}
+                    render={({ field: control }) => <ColorInput id={id} value={(control.value as string) ?? ''} onChange={control.onChange} presets={field.presets ?? []} />}
+                  />
                 ) : field.type === 'textarea' ? (
                   <Textarea id={id} aria-invalid={!!message} {...form.register(field.name)} />
                 ) : (
@@ -103,5 +111,27 @@ export function FormDialog<T extends FieldValues>({ trigger, triggerLabel, title
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ColorInput({ id, value, onChange, presets }: { id: string; value: string; onChange: (value: string) => void; presets: Option[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {presets.map((preset) => (
+        <button
+          key={preset.value}
+          type="button"
+          title={preset.label}
+          aria-label={preset.label}
+          aria-pressed={value.toUpperCase() === preset.value}
+          onClick={() => onChange(preset.value)}
+          className="size-7 rounded-full border-2 border-transparent aria-pressed:border-foreground"
+          style={{ backgroundColor: preset.value }}
+        />
+      ))}
+      <input type="color" aria-label="Chọn màu khác" className="size-7 cursor-pointer rounded border bg-transparent" value={value || '#000000'} onChange={(e) => onChange(e.target.value.toUpperCase())} />
+      <Input id={id} className="w-28 font-mono" placeholder="#RRGGBB" value={value} onChange={(e) => onChange(e.target.value)} />
+      {value && <Button type="button" variant="ghost" size="sm" onClick={() => onChange('')}>Bỏ màu</Button>}
+    </div>
   )
 }
