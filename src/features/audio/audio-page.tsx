@@ -22,13 +22,37 @@ const wordLink = (row: { wordId: string; lemma: string }) => (
   <Link className="font-medium underline-offset-4 hover:underline" to={`/words/${row.wordId}`}>{row.lemma}</Link>
 )
 
-const GENERATED_COLUMNS: Column<GeneratedAudio>[] = [
-  { id: 'lemma', header: 'Từ', cell: wordLink },
-  { id: 'ipa', header: 'IPA', cell: (g) => g.ipa },
+interface GeneratedSound {
+  audioUrl: string
+  ipa: string
+  words: { wordId: string; lemma: string }[]
+  meanings: number
+}
+
+// Meanings with the same IPA share one file, so the log shows one row per file.
+function mergeSounds(prev: GeneratedSound[], batch: GeneratedAudio[]): GeneratedSound[] {
+  const prevByUrl = new Map(prev.map((s) => [s.audioUrl, s]))
+  const touched = new Map<string, GeneratedSound>()
+  for (const g of batch) {
+    const base = touched.get(g.audioUrl) ?? prevByUrl.get(g.audioUrl) ?? { audioUrl: g.audioUrl, ipa: g.ipa, words: [], meanings: 0 }
+    const words = base.words.some((w) => w.wordId === g.wordId) ? base.words : [...base.words, { wordId: g.wordId, lemma: g.lemma }]
+    touched.set(g.audioUrl, { ...base, words, meanings: base.meanings + 1 })
+  }
+  return [...touched.values(), ...prev.filter((s) => !touched.has(s.audioUrl))].slice(0, LOG_SIZE)
+}
+
+const GENERATED_COLUMNS: Column<GeneratedSound>[] = [
+  {
+    id: 'lemma',
+    header: 'Từ',
+    cell: (s) => <span className="flex flex-wrap gap-x-2">{s.words.map((w) => <span key={w.wordId}>{wordLink(w)}</span>)}</span>,
+  },
+  { id: 'ipa', header: 'IPA', cell: (s) => s.ipa },
+  { id: 'meanings', header: 'Số nghĩa', cell: (s) => <span className="tabular-nums">{s.meanings}</span> },
   {
     id: 'play',
     header: 'Nghe',
-    cell: (g) => <Button variant="ghost" size="icon" aria-label={`Nghe ${g.lemma}`} onClick={() => playAudio(g.audioUrl)}><Play /></Button>,
+    cell: (s) => <Button variant="ghost" size="icon" aria-label={`Nghe ${s.ipa}`} onClick={() => playAudio(s.audioUrl)}><Play /></Button>,
   },
 ]
 
@@ -58,7 +82,7 @@ export function AudioPage() {
   const [pickedVoice, setPickedVoice] = useState<string | null>(null)
   const voiceId = pickedVoice ?? status?.voice
   const [running, setRunning] = useState(false)
-  const [generated, setGenerated] = useState<GeneratedAudio[]>([])
+  const [generated, setGenerated] = useState<GeneratedSound[]>([])
   const [failed, setFailed] = useState<FailedAudio[]>([])
   const [doneCount, setDoneCount] = useState(0)
   const stopRef = useRef(false)
@@ -75,14 +99,14 @@ export function AudioPage() {
         const result = await generateAudio({ limit, voiceId })
         total += result.generated.length
         setDoneCount(total)
-        setGenerated((prev) => [...result.generated, ...prev].slice(0, LOG_SIZE))
+        setGenerated((prev) => mergeSounds(prev, result.generated))
         // A word that keeps failing is listed once, with its latest error.
         setFailed((prev) => [...result.failed, ...prev.filter((p) => !result.failed.some((f) => f.pronunciationId === p.pronunciationId))])
         client.setQueryData<AudioStatus>(AUDIO_STATUS_KEY, (old) => old && { ...old, missing: result.remaining })
         // Nothing new means only failing words are left; looping would spend credits for nothing.
         if (!untilDone || stopRef.current || result.remaining === 0 || result.generated.length === 0) break
       }
-      toast.success(`Đã tạo ${total} audio`)
+      toast.success(`Đã gắn audio cho ${total} nghĩa`)
     } catch (err) {
       toastError(err)
     } finally {
@@ -146,7 +170,7 @@ export function AudioPage() {
                 )}
               </div>
               <p className="text-sm text-muted-foreground">
-                {running ? `Đang tạo… đã xong ${doneCount} audio trong lần chạy này.` : 'Audio được đọc từ IPA của từng nghĩa. Mỗi IPA chỉ gọi ElevenLabs một lần cho mỗi voice; các nghĩa trùng IPA dùng chung file.'}
+                {running ? `Đang tạo… đã gắn audio cho ${doneCount} nghĩa trong lần chạy này.` : 'Audio được đọc từ IPA của từng nghĩa. Mỗi IPA chỉ gọi ElevenLabs một lần cho mỗi voice; các nghĩa trùng IPA dùng chung file.'}
               </p>
             </CardContent>
           </Card>
@@ -161,7 +185,7 @@ export function AudioPage() {
             <h2 className="font-medium">Vừa tạo</h2>
             {generated.length === 0
               ? <EmptyState>Chưa tạo audio nào trong phiên này.</EmptyState>
-              : <DataTable columns={GENERATED_COLUMNS} rows={generated} rowKey={(g) => g.pronunciationId} />}
+              : <DataTable columns={GENERATED_COLUMNS} rows={generated} rowKey={(s) => s.audioUrl} />}
           </section>
         </TabsContent>
       </Tabs>
